@@ -50,6 +50,8 @@ WEAPON_FILTER = (sys.argv[1] if len(sys.argv) > 1 else os.getenv("WEAPON_FILTER"
 
 # Modo "una pasada" (para GitHub Actions): revisa lo más reciente, avisa y termina.
 ONCE = os.getenv("ONCE") == "1"
+TEST = os.getenv("TEST") == "true"   # ejecución manual de prueba: manda un resumen a Telegram
+example = []
 MAX_AGE_MIN = int(os.getenv("MAX_AGE_MIN", "12"))   # en ONCE solo mira listados de los últimos N minutos
 
 
@@ -66,6 +68,8 @@ def too_old(listing: dict) -> bool:
     return (datetime.now(timezone.utc) - t).total_seconds() > MAX_AGE_MIN * 60
 
 charm_cache = {}
+stats = {"total": 0, "with_charm": 0, "below_avg": 0, "alerts": 0}
+shown_keys = []
 
 
 def load_seen():
@@ -157,6 +161,11 @@ def check(listing: dict) -> None:
 
     item = listing.get("item", {})
     name = item.get("market_hash_name", "")
+    stats["total"] += 1
+    if not shown_keys:
+        shown_keys.append(1)
+        print("Campos del anuncio:", sorted(listing.keys()))
+        print("Campos del objeto:", sorted(item.keys()))
 
     # 1) filtro de arma
     if WEAPON_FILTER and WEAPON_FILTER not in name.lower():
@@ -166,6 +175,14 @@ def check(listing: dict) -> None:
     charms = item.get("keychains") or []
     if not charms:
         return
+    stats["with_charm"] += 1
+    if TEST and not example:
+        _ref = (listing.get("reference") or {}).get("predicted_price")
+        _c = "; ".join(f"{c.get('name', '?')} #{c.get('pattern', '?')}" for c in charms)
+        example.append(
+            f"Ejemplo real leido: {name} | precio {listing.get('price', 0)/100:.2f} $ | "
+            f"media {(_ref or 0)/100:.2f} $ | charm {_c}"
+        )
 
     # 3) precio por debajo de la media
     ref = (listing.get("reference") or {}).get("predicted_price")
@@ -174,6 +191,7 @@ def check(listing: dict) -> None:
         return
     if price >= ref:          # solo armas POR DEBAJO de la media
         return
+    stats["below_avg"] += 1
 
     diff = (price - ref) / ref * 100
     lines = []
@@ -207,6 +225,7 @@ def check(listing: dict) -> None:
     )
     if INCLUDE_CSFLOAT_LINK:
         msg += f"\nCSFloat (este anuncio exacto): https://csfloat.com/item/{lid}"
+    stats["alerts"] += 1
     notify(msg)
 
 
@@ -216,6 +235,17 @@ def main() -> None:
             for listing in fetch(p):
                 check(listing)
             time.sleep(3)
+        resumen = (
+            f"Resumen: {stats['total']} anuncios revisados, {stats['with_charm']} con charm, "
+            f"{stats['below_avg']} por debajo de la media, {stats['alerts']} avisos enviados."
+        )
+        print(resumen)
+        if TEST:
+            notify(
+                "PRUEBA OK: el bot funciona y llega a tu Telegram.\n"
+                + resumen + "\n"
+                + (example[0] if example else "No encontre anuncios con charm en la ventana de prueba.")
+            )
         return
     print(
         f"Escáner activo. Rango {MIN_EUR:.2f}-{MAX_EUR:.2f} EUR "
