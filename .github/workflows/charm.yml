@@ -18,14 +18,14 @@ on:
   workflow_dispatch:
     inputs:
       test:
-        description: "Prueba: mira las últimas 4 horas y manda un resumen a Telegram"
+        description: "Prueba: ignora la memoria, amplía el precio hasta 50 $ y manda un resumen a Telegram"
         type: boolean
         default: false
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,28 +33,20 @@ jobs:
           python-version: "3.12"
       - run: pip install requests
 
-      # Elige cuántos minutos hacia atrás mirar según la hora local (Alemania),
-      # para cubrir exactamente el hueco desde la ejecución anterior.
-      - name: Calcular ventana
-        run: |
-          H=$(TZ=Europe/Berlin date +%H); M=$(TZ=Europe/Berlin date +%M)
-          T=$((10#$H * 60 + 10#$M))
-          if   [ $T -ge 540 ] && [ $T -lt 570 ];  then W=80    # 09:00 (tras la noche, desde 07:45)
-          elif [ $T -ge 570 ] && [ $T -lt 780 ];  then W=65    # 09:30-13:00 cada hora
-          elif [ $T -ge 780 ] && [ $T -lt 960 ];  then W=50    # 13:00-16:00 cada 45 min
-          elif [ $T -ge 960 ] && [ $T -lt 1300 ]; then W=35    # 16:00-21:40 cada 30 min
-          elif [ $T -ge 1300 ] && [ $T -lt 1350 ]; then W=25   # 21:45 (tras el de 21:30)
-          else W=125                                           # noche, cada 2 horas
-          fi
-          if [ "${{ github.event.inputs.test }}" = "true" ]; then W=240; fi
-          echo "MAX_AGE_MIN=$W" >> $GITHUB_ENV
-          echo "Hora local $H:$M -> ventana $W min"
+      # Memoria entre ejecuciones: recuerda los anuncios ya vistos (seen.json).
+      # Cada ejecución restaura la memoria más reciente y guarda la nueva al terminar.
+      - name: Memoria de anuncios vistos
+        uses: actions/cache@v4
+        with:
+          path: seen.json
+          key: seen-${{ github.run_id }}
+          restore-keys: |
+            seen-
 
       - run: python charm_scanner.py
         env:
           ONCE: "1"
           TEST: ${{ github.event.inputs.test }}
-          PAGES: "4"
           WEAPON_FILTER: ""            # pon aquí un arma, p. ej. "AK-47", o déjalo vacío
           CSFLOAT_API_KEY: ${{ secrets.CSFLOAT_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
