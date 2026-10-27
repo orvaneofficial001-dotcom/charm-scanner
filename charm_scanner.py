@@ -28,7 +28,7 @@ MAX_EUR = 1.00
 EUR_TO_USD = 1.08         # CSFloat trabaja en dólares: pon aquí el cambio actual
 POLL_SECONDS = 30         # solo en modo continuo; no bajes de esto
 START_PAGES = 4           # páginas (50 listados c/u) que revisa al arrancar en modo continuo
-MIN_CHARM_USD = 2.0       # solo cuenta charms que suelto valgan al menos esto (en $)
+MIN_CHARM_USD = 0.0       # el charm puede valer cualquier precio (sube esto si quieres exigir un mínimo, en $)
 SEEN_FILE = "seen.json"   # recuerda lo ya avisado (modo continuo)
 MIN_PROFIT_USD = 0.05     # "importante" = beneficio estimado igual o superior a esto (en $)
 SELL_FEE = 0.0            # comisión de venta a descontar (0 = no contar; CSFloat cobra ~2 %)
@@ -211,18 +211,24 @@ def check(listing: dict) -> None:
     diff = (price - ref) / ref * 100
     lines = []
     charms_value = 0.0
+    unknown_price = False
     for c in charms:
         low = charm_lowest_price(c.get("name", ""))
         if low is not None and low >= MIN_CHARM_USD:
             charms_value += low
-        low_txt = f" (suelto desde {low:.2f} $)" if low is not None else ""
+        if low is None:
+            unknown_price = True
+        low_txt = f" (suelto desde {low:.2f} $)" if low is not None else " (precio suelto no encontrado)"
         lines.append(f"{charm_label(c)}{low_txt}")
 
     # 3b) ¿merece la pena? Beneficio estimado = vender arma (a la media) + vender charm
     #     - lo que pagas por el arma (comisiones y coste de quitar el charm, según los ajustes).
-    if charms_value <= 0:
-        return
     profit = (1 - SELL_FEE) * (ref / 100 + charms_value) - price / 100 - DETACH_COST
+    print(
+        f"Candidato (con charm y bajo la media): {name} | compras {price/100:.2f} $ vs media {ref/100:.2f} $ | "
+        f"charms: {'; '.join(lines)} | valor de charms contados (>= {MIN_CHARM_USD} $): {charms_value:.2f} $ | "
+        f"beneficio estimado {profit:.2f} $"
+    )
     if profit < MIN_PROFIT_USD:
         return
 
@@ -234,7 +240,9 @@ def check(listing: dict) -> None:
         f"🔫 {name}\n"
         f"💰 Compras a {price/100:.2f} $ ({abs(diff):.1f} % por debajo de la media de {ref/100:.2f} $)\n"
         f"🏷 Charm: {'; '.join(lines)}\n"
-        f"📊 Con comisión de venta 2 % y quitar el charm: ~{real_profit:.2f} $\n\n"
+        f"📊 Con comisión de venta 2 % y quitar el charm: ~{real_profit:.2f} $\n"
+        + ("⚠️ No pude ver el precio de algún charm: el beneficio no lo incluye.\n" if unknown_price else "")
+        + "\n"
         f"🔗 Steam (página del arma, filtra por Attached Charm):\n{steam_link}"
     )
     if INCLUDE_CSFLOAT_LINK:
