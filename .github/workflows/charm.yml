@@ -16,6 +16,11 @@ on:
     - cron: "0,30 15-20 * * *"
     - cron: "45 20,22,0,2,4,6 * * *"
   workflow_dispatch:
+    inputs:
+      test:
+        description: "Prueba: mira las últimas 4 horas y manda un resumen a Telegram"
+        type: boolean
+        default: false
 
 jobs:
   scan:
@@ -41,12 +46,14 @@ jobs:
           elif [ $T -ge 1300 ] && [ $T -lt 1350 ]; then W=25   # 21:45 (tras el de 21:30)
           else W=125                                           # noche, cada 2 horas
           fi
+          if [ "${{ github.event.inputs.test }}" = "true" ]; then W=240; fi
           echo "MAX_AGE_MIN=$W" >> $GITHUB_ENV
           echo "Hora local $H:$M -> ventana $W min"
 
       - run: python charm_scanner.py
         env:
           ONCE: "1"
+          TEST: ${{ github.event.inputs.test }}
           PAGES: "4"
           WEAPON_FILTER: ""            # pon aquí un arma, p. ej. "AK-47", o déjalo vacío
           CSFLOAT_API_KEY: ${{ secrets.CSFLOAT_API_KEY }}
