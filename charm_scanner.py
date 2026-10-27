@@ -70,6 +70,7 @@ def too_old(listing: dict) -> bool:
 charm_cache = {}
 stats = {"total": 0, "with_charm": 0, "below_avg": 0, "alerts": 0}
 shown_keys = []
+all_item_keys = set()
 
 
 def load_seen():
@@ -119,8 +120,8 @@ def fetch(page: int = 0):
             "limit": 50,
             "page": page,
             "sort_by": "most_recent",
-            "min_price": MIN_CENTS,
-            "max_price": MAX_CENTS,
+            "min_price": 1 if TEST else MIN_CENTS,
+            "max_price": 5000 if TEST else MAX_CENTS,
             "type": "buy_now",
         },
         timeout=15,
@@ -168,6 +169,7 @@ def check(listing: dict) -> None:
     item = listing.get("item", {})
     name = item.get("market_hash_name", "")
     stats["total"] += 1
+    all_item_keys.update(item.keys())
     if not shown_keys:
         shown_keys.append(1)
         print("Campos del anuncio:", sorted(listing.keys()))
@@ -246,10 +248,13 @@ def main() -> None:
             f"{stats['below_avg']} por debajo de la media, {stats['alerts']} avisos enviados."
         )
         print(resumen)
+        extra = sorted(k for k in all_item_keys if "keychain" in k.lower() or "sticker" in k.lower() or "charm" in k.lower())
+        print("Campos de charm/sticker vistos en algun anuncio:", extra)
         if TEST:
             notify(
                 "PRUEBA OK: el bot funciona y llega a tu Telegram.\n"
                 + resumen + "\n"
+                + f"Campos de charm/sticker vistos: {extra}\n"
                 + (example[0] if example else "No encontre anuncios con charm en la ventana de prueba.")
             )
         return
