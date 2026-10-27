@@ -94,15 +94,21 @@ seen = load_seen()
 def notify(text: str) -> None:
     print(text + "\n", flush=True)
     token, chat = os.getenv("TELEGRAM_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
-    if token and chat:
-        try:
-            requests.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                data={"chat_id": chat, "text": text},
-                timeout=10,
-            )
-        except requests.RequestException as e:
-            print("Error enviando a Telegram:", e)
+    if not token or not chat:
+        print("TELEGRAM: faltan los secretos TELEGRAM_TOKEN o TELEGRAM_CHAT_ID (estan vacios).")
+        return
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{token.strip()}/sendMessage",
+            data={"chat_id": chat.strip(), "text": text},
+            timeout=10,
+        )
+        if r.ok:
+            print("TELEGRAM: mensaje enviado correctamente.")
+        else:
+            print(f"TELEGRAM: ERROR {r.status_code}: {r.text}")
+    except requests.RequestException as e:
+        print("TELEGRAM: error de red:", e)
 
 
 def fetch(page: int = 0):
