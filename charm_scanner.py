@@ -99,34 +99,45 @@ def notify(text: str) -> None:
         print("TELEGRAM: error de red:", e)
 
 
-def fetch(page: int = 0):
-    r = requests.get(
-        API,
-        headers={"Authorization": API_KEY},
-        params={
-            "limit": 50,
-            "page": page,
-            "sort_by": "most_recent",
-            "min_price": 1 if TEST else MIN_CENTS,
-            "max_price": 5000 if TEST else MAX_CENTS,   # en prueba se amplía para encontrar algún charm
-            "type": "buy_now",
-        },
-        timeout=15,
-    )
+fetch_calls = [0]
+
+
+def fetch(cursor=None, page: int = 0):
+    """Devuelve (anuncios, cursor_siguiente). Usa cursor si CSFloat lo da; si no, el número de página."""
+    params = {
+        "limit": 50,
+        "sort_by": "most_recent",
+        "min_price": 1 if TEST else MIN_CENTS,
+        "max_price": 5000 if TEST else MAX_CENTS,   # en prueba se amplía para encontrar algún charm
+        "type": "buy_now",
+    }
+    if cursor:
+        params["cursor"] = cursor
+    else:
+        params["page"] = page
+    r = requests.get(API, headers={"Authorization": API_KEY}, params=params, timeout=15)
     if r.status_code == 429:
         if ONCE:
             print("CSFloat: límite de peticiones alcanzado (429). Termino esta pasada.")
-            return []
+            return [], None
         print("Límite de peticiones alcanzado, espero 2 minutos...")
         time.sleep(120)
-        return []
+        return [], None
     if not r.ok:
         print(f"CSFloat respondió {r.status_code}: {r.text[:200]}")
     r.raise_for_status()
     data = r.json()
-    rows = data["data"] if isinstance(data, dict) else data
-    print(f"Página {page}: {len(rows)} anuncios recibidos de CSFloat.")
-    return rows
+    if isinstance(data, dict):
+        rows = data.get("data", [])
+        nxt = data.get("cursor")
+    else:
+        rows, nxt = data, None
+    fetch_calls[0] += 1
+    if fetch_calls[0] == 1:
+        keys = sorted(data.keys()) if isinstance(data, dict) else "lista"
+        print(f"Respuesta de CSFloat: claves = {keys}; ¿trae cursor? {'sí' if nxt else 'no'}")
+    print(f"Llamada {fetch_calls[0]}: {len(rows)} anuncios recibidos de CSFloat.")
+    return rows, nxt
 
 
 def charm_lowest_price(name: str):
@@ -237,23 +248,33 @@ def main() -> None:
         first_run = not seen          # sin memoria previa: se queda en MIN_SCAN anuncios
         scanned = 0
         hit_seen = False
+        run_ids = set()
+        cursor = None
         for p in range(MAX_PAGES):
-            rows = fetch(p)
+            rows, cursor = fetch(cursor, p)
             if not rows:
                 break
+            new_in_page = 0
             for listing in rows:
+                lid = listing.get("id")
+                if lid in run_ids:
+                    continue          # repetido dentro de esta misma pasada
+                run_ids.add(lid)
+                new_in_page += 1
                 scanned += 1
-                if listing.get("id") in seen:
+                if lid in seen:
                     hit_seen = True   # ya vimos este: hemos llegado a lo de la pasada anterior
                 check(listing)
-            # parar cuando ya revisamos el mínimo Y llegamos a anuncios ya vistos
+            if new_in_page == 0:
+                print("Esa página no trajo anuncios distintos a los ya leídos; paro.")
+                break
             if scanned >= MIN_SCAN and (hit_seen or first_run):
                 break
             time.sleep(2)
         if not TEST:
             save_seen()
         resumen = (
-            f"Resumen: {stats['fetched']} anuncios nuevos revisados ({scanned} leídos en total), "
+            f"Resumen: {stats['fetched']} anuncios distintos revisados ({scanned} leídos en total), "
             f"{stats['with_charm']} con charm, "
             f"{stats['below_avg']} por debajo de la media, {stats['alerts']} avisos enviados."
         )
@@ -277,8 +298,10 @@ def main() -> None:
         f"(~{MIN_CENTS/100:.2f}-{MAX_CENTS/100:.2f} $). Filtro: {WEAPON_FILTER or 'todas'}. Ctrl+C para parar."
     )
     try:
+        cursor = None
         for p in range(START_PAGES):
-            for listing in fetch(p):
+            rows, cursor = fetch(cursor, p)
+            for listing in rows:
                 check(listing)
             save_seen()
             time.sleep(3)
@@ -287,7 +310,8 @@ def main() -> None:
 
     while True:
         try:
-            for listing in fetch(0):
+            rows, _ = fetch()
+            for listing in rows:
                 check(listing)
             save_seen()
         except requests.RequestException as e:
