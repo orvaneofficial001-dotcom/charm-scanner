@@ -22,6 +22,15 @@ on:
         type: boolean
         default: false
 
+# Permiso para guardar el registro de ofertas (ofertas.csv) en el repositorio
+permissions:
+  contents: write
+
+# Una sola ejecución a la vez, para que no se pisen entre ellas
+concurrency:
+  group: charm-scanner
+  cancel-in-progress: false
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -33,12 +42,13 @@ jobs:
           python-version: "3.12"
       - run: pip install requests
 
-      # Memoria entre ejecuciones: recuerda los anuncios ya vistos (seen.json).
-      # Cada ejecución restaura la memoria más reciente y guarda la nueva al terminar.
+      # Memoria entre ejecuciones: anuncios ya vistos (seen.json) y resumen diario (state.json).
       - name: Memoria de anuncios vistos
         uses: actions/cache@v4
         with:
-          path: seen.json
+          path: |
+            seen.json
+            state.json
           key: seen-${{ github.run_id }}
           restore-keys: |
             seen-
@@ -51,3 +61,18 @@ jobs:
           CSFLOAT_API_KEY: ${{ secrets.CSFLOAT_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      # Si hubo ofertas nuevas, guarda ofertas.csv en el repositorio
+      - name: Guardar registro de ofertas
+        if: ${{ github.event.inputs.test != 'true' }}
+        run: |
+          if [ -n "$(git status --porcelain ofertas.csv)" ]; then
+            git config user.name "charm-bot"
+            git config user.email "charm-bot@users.noreply.github.com"
+            git add ofertas.csv
+            git commit -m "Registro de ofertas"
+            git pull --rebase || true
+            git push
+          else
+            echo "Sin ofertas nuevas que guardar."
+          fi
